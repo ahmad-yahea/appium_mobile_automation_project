@@ -1,0 +1,32 @@
+#compdef run-tests.sh
+
+# Tab completion for scripts/run-tests.sh (zsh).
+#
+# Install: add these two lines to ~/.zshrc (adjust the path if your checkout
+# lives elsewhere), then open a new shell:
+#
+#   fpath=(~/appium_mobile_automation_project/scripts/completions $fpath)
+#   autoload -Uz compinit && compinit
+#
+# Completes -n/--repeat, -h/--help, the common -D properties, and - as the
+# bare positional - every *Test class under src/test/java/automation/tests
+# (discovered live, so new test classes show up automatically).
+
+_run-tests() {
+    local -a tests
+    tests=( ${PWD}/src/test/java/automation/tests/*Test.java(N:t:r) )
+
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[show help and exit]' \
+        '(-n --repeat)'{-n,--repeat}'[run the whole suite N times in a row]:count:_numbers' \
+        '(-p --parallel)'{-p,--parallel}'[run across two emulators at once]' \
+        '*::arg:->rest'
+
+    if [[ $state == rest ]]; then
+        _alternative \
+            "tests:test class:(${tests})" \
+            'props:mvn -D property:(-Dtest\= -Dretry.skip\=true -Dretry.maxAttempts\=1 -Dplatform\=ios -Ddevice\= -Dtest.forkCount\=2 -Dandroid.devices\= -Dfork.index\=)'
+    fi
+}
+
+_run-tests "$@"

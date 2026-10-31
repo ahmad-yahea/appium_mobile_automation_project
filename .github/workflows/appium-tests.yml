@@ -1,0 +1,189 @@
+name: Appium tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appium-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  appium-tests:
+    # Linux, not macOS: GitHub's macOS runners are Apple Silicon, which can't
+    # boot the Android emulator (no nested virtualization). Ubuntu runners can,
+    # once KVM is enabled below.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # The runner image ships with toolchains this job never uses; without
+      # clearing them, downloading the Android system image fails with
+      # "No space left on device".
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell
+          sudo docker image prune --all --force > /dev/null || true
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The app under test is private and not part of this repo. Supply a
+      # download URL as the APP_APK_URL secret; without it the emulator tests
+      # are skipped and only the unit tests run.
+      - name: Fetch app build
+        id: app
+        env:
+          APP_APK_URL: ${{ secrets.APP_APK_URL }}
+        run: |
+          if [[ -n "${APP_APK_URL:-}" ]]; then
+            curl -fsSL -o src/test/resources/app-staging-release.apk "$APP_APK_URL"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::APP_APK_URL secret not set - running unit tests only (no app build to test)"
+          fi
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Pinned to the versions verified locally. appium-flutter-driver 3.10.0
+      # pulls in appium-flutter-finder 0.3.0, which is ESM-only and fails to
+      # load ("No "exports" main defined"), so stay on 3.9.1 (finder 0.2.0).
+      - name: Install Appium and drivers
+        run: |
+          npm install -g appium@3.8.0
+          appium driver install uiautomator2@7.6.2
+          appium driver install --source=npm appium-flutter-driver@3.9.1
+
+      # Journey tests invite their user through the Postman CLI, so they need the
+      # POSTMAN_API_KEY repo secret. Without it, only the Signup* tests run
+      # instead of the whole job failing at login.
+      - name: Check for Postman API key
+        id: postman
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          if [[ -n "${POSTMAN_API_KEY:-}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::POSTMAN_API_KEY secret not set - running Signup* tests only (journey tests need it)"
+          fi
+
+      - name: Install Postman CLI
+        if: steps.postman.outputs.available == 'true'
+        run: curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
+
+      # The key only ever lives in this step's environment, never in the
+      # workflow file or other steps; GitHub masks it in the logs.
+      - name: Log in to Postman CLI
+        if: steps.postman.outputs.available == 'true'
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: postman login --with-api-key "$POSTMAN_API_KEY"
+
+      - name: Run unit tests (no emulator)
+        if: steps.app.outputs.available != 'true'
+        run: mvn -B test -Dtest=ConfigTest
+
+      - name: Run tests on Android emulator
+        id: run_tests
+        if: steps.app.outputs.available == 'true'
+        continue-on-error: true
+        env:
+          POSTMAN_COLLECTION_ID: ${{ secrets.POSTMAN_COLLECTION_ID }}
+          POSTMAN_ENVIRONMENT_ID: ${{ secrets.POSTMAN_ENVIRONMENT_ID }}
+          POSTMAN_INTEGRATION_ID: ${{ secrets.POSTMAN_INTEGRATION_ID }}
+          TEST_EMAIL_DOMAIN: ${{ vars.TEST_EMAIL_DOMAIN }}
+          TEST_EMAIL_LOCAL_PART: ${{ vars.TEST_EMAIL_LOCAL_PART }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          avd-name: emulator-5554
+          # Match the local medium_phone AVD (1080x2400 @ 420dpi) instead of the
+          # runner's default 320x640 low-density screen.
+          profile: pixel_6
+          # The default 2 cores / 2 GB left the app's first Flutter frame
+          # unrendered past the tests' 20s startup window ("No root widget is
+          # attached"); ubuntu-latest has 4 vCPUs and 16 GB to spare.
+          cores: 4
+          ram-size: 4096M
+          heap-size: 576M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            ./scripts/setup-emulator-egypt.sh
+            nohup ./scripts/ci-capture-diagnostics.sh > /dev/null 2>&1 &
+            mvn -B test -Dtest="${{ steps.postman.outputs.available == 'true' && '*Test' || 'Signup*UserTypeTest' }}"
+
+      - name: Parse test results
+        if: always() && steps.app.outputs.available == 'true'
+        run: ./scripts/parse-surefire-results.sh target/surefire-reports slack-summary.txt
+
+      - name: Upload surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: |
+            target/surefire-reports/**
+            target/diag-*
+
+      - name: Post results to Slack
+        if: always() && steps.app.outputs.available == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL:-}" ]]; then
+            echo "SLACK_WEBHOOK_URL secret not set, skipping Slack notification"
+            exit 0
+          fi
+
+          STATUS_EMOJI=":white_check_mark:"
+          if [[ "${{ steps.run_tests.outcome }}" != "success" ]]; then
+            STATUS_EMOJI=":x:"
+          fi
+
+          SUMMARY=$(cat slack-summary.txt)
+          TEXT=$(printf '%s Appium run on `%s` (%s)\n\n```\n%s\n```\n<%s|View run>' \
+            "$STATUS_EMOJI" "${{ github.ref_name }}" "${{ github.event_name }}" "$SUMMARY" "$RUN_URL")
+
+          PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$TEXT")
+
+          curl -sf -X POST -H 'Content-type: application/json' \
+            --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+
+      - name: Fail job if tests failed
+        if: always() && steps.app.outputs.available == 'true'
+        run: |
+          if [[ "${{ steps.run_tests.outcome }}" != "success" ]]; then
+            echo "Test run step failed, see logs and Slack notification above."
+            exit 1
+          fi

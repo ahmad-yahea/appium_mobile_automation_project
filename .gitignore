@@ -1,0 +1,33 @@
+# Build output
+target/
+test-output/
+slack-summary.txt
+hs_err_pid*
+
+# App builds under test (never committed)
+*.apk
+*.aab
+*.ipa
+*.app/
+
+# Secrets / local configuration
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+.DS_Store
+
+# Tooling caches
+.claude/
+node_modules/

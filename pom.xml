@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" 
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.ahmadyahea</groupId>
+  <artifactId>appium-flutter-automation</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <name>Appium Flutter Automation</name>
+  <description>JUnit 5 + Appium Flutter Driver mobile test automation framework</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <java.version>25</java.version>
+    <appium.version>10.1.0</appium.version>
+    <selenium.version>4.14.1</selenium.version>
+    <junit.version>5.11.0</junit.version>
+    <!-- Number of forked JVMs the test suite runs in. Default 1 = today's
+         behaviour (one emulator, sequential). Set -Dtest.forkCount=2 (plus
+         -Dandroid.devices=emulator-5554,emulator-5556) to run across two
+         emulators in parallel - see README "Running on two emulators". -->
+    <test.forkCount>1</test.forkCount>
+    <!-- Comma-separated emulator serials; each fork picks one by fork number. -->
+    <!-- Empty = fall back to ANDROID_DEVICES (env/.env), then emulator-5554. -->
+    <android.devices></android.devices>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.appium</groupId>
+      <artifactId>java-client</artifactId>
+      <version>${appium.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.github.5v1988</groupId>
+      <artifactId>appium-flutter-client</artifactId>
+      <version>1.0.5</version>
+    </dependency>
+    <dependency>
+      <groupId>org.seleniumhq.selenium</groupId>
+      <artifactId>selenium-java</artifactId>
+      <version>${selenium.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.9</version>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>1.4.11</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <release>${java.version}</release>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.3.0</version>
+        <configuration>
+          <includes>
+            <include>**/*Test.java</include>
+            <include>**/*Tests.java</include>
+          </includes>
+          <forkCount>${test.forkCount}</forkCount>
+          <reuseForks>true</reuseForks>
+          <systemPropertyVariables>
+            <!-- Surefire-internal token; expose it to the fork JVM so
+                 FlutterBaseTest can pick its emulator. 1-based per fork. -->
+            <surefire.forkNumber>${surefire.forkNumber}</surefire.forkNumber>
+            <android.devices>${android.devices}</android.devices>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-clean-plugin</artifactId>
+        <version>3.4.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>3.3.1</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.2</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
